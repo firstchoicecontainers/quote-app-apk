@@ -59,6 +59,12 @@
   .card { background: var(--surface); border-radius: var(--radius); box-shadow: 0 4px 20px rgba(13,44,84,0.08); border: 1px solid var(--border); padding: 26px 24px; margin-bottom: 18px; }
   .card h2 { font-size: 16px; font-weight: 800; color: var(--navy); margin: 0 0 16px; }
 
+  .stats-row { display: flex; align-items: center; }
+  .stat-block { flex: 1; text-align: center; }
+  .stat-value { font-size: 22px; font-weight: 800; color: var(--navy); line-height: 1.2; }
+  .stat-label { font-size: 11px; color: var(--text-faint); font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; margin-top: 4px; }
+  .stat-divider { width: 1px; height: 38px; background: var(--border); margin: 0 10px; }
+
   .feature-list { display: grid; gap: 14px; }
   .feature-item { display: flex; gap: 14px; align-items: flex-start; }
   .feature-icon {
@@ -143,6 +149,20 @@
   </div>
 
   <div class="content">
+
+    <div class="card" id="statsCard">
+      <div class="stats-row">
+        <div class="stat-block">
+          <div class="stat-value" id="statCount">—</div>
+          <div class="stat-label">Total Downloads</div>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-block">
+          <div class="stat-value" id="statLast">—</div>
+          <div class="stat-label">Last Downloaded</div>
+        </div>
+      </div>
+    </div>
 
     <div class="card">
       <h2>What's Inside</h2>
@@ -241,7 +261,7 @@
           ⚠️ Android may show a <b>Play Protect</b> warning since this app isn't from the Play Store — that's expected for internal company apps. Tap <b>"Install anyway"</b> if prompted.
         </div>
 
-        <a class="modal-download-btn" href="https://github.com/firstchoicecontainers/quote-app-apk/releases/download/v1.0.0/app-release.apk" download>
+        <a class="modal-download-btn" href="https://github.com/firstchoicecontainers/quote-app-apk/releases/download/v1.0.0/app-release.apk" onclick="logDownload()" download>
           ⬇ Download Now
         </a>
         <div class="modal-file-info">app-release.apk &middot; 43.8 MB &middot; v1.0.0</div>
@@ -259,6 +279,52 @@
       document.getElementById('installModal').classList.remove('open');
       document.body.style.overflow = '';
     }
+
+    // ---- Download counter + last-downloaded (via CountAPI, free, no signup) ----
+    var CA_NS = 'fcc-quote-builder-app';
+    var CA_KEY_COUNT = 'downloads-v1';
+    var CA_KEY_LAST = 'last-download-ts-v1';
+
+    function logDownload() {
+      // Fire-and-forget: increments the count and records "now" as last-downloaded.
+      fetch('https://api.countapi.xyz/hit/' + CA_NS + '/' + CA_KEY_COUNT).catch(function(){});
+      var nowEpoch = Math.floor(Date.now() / 1000);
+      fetch('https://api.countapi.xyz/set/' + CA_NS + '/' + CA_KEY_LAST + '?value=' + nowEpoch).catch(function(){});
+    }
+
+    function timeAgo(epochSeconds) {
+      var diff = Math.floor(Date.now() / 1000) - epochSeconds;
+      if (diff < 60) return 'Just now';
+      if (diff < 3600) { var m = Math.floor(diff / 60); return m + ' min' + (m === 1 ? '' : 's') + ' ago'; }
+      if (diff < 86400) { var h = Math.floor(diff / 3600); return h + ' hour' + (h === 1 ? '' : 's') + ' ago'; }
+      var d = Math.floor(diff / 86400);
+      if (d < 30) return d + ' day' + (d === 1 ? '' : 's') + ' ago';
+      var date = new Date(epochSeconds * 1000);
+      return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    function loadStats() {
+      fetch('https://api.countapi.xyz/get/' + CA_NS + '/' + CA_KEY_COUNT)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          document.getElementById('statCount').textContent = (data && typeof data.value === 'number') ? data.value.toLocaleString() : '0';
+        })
+        .catch(function() { document.getElementById('statCount').textContent = '—'; });
+
+      fetch('https://api.countapi.xyz/get/' + CA_NS + '/' + CA_KEY_LAST)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var el = document.getElementById('statLast');
+          if (data && typeof data.value === 'number' && data.value > 0) {
+            el.textContent = timeAgo(data.value);
+          } else {
+            el.textContent = 'No downloads yet';
+          }
+        })
+        .catch(function() { document.getElementById('statLast').textContent = '—'; });
+    }
+
+    loadStats();
   </script>
 
 </body>
