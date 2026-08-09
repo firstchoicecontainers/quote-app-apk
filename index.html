@@ -129,6 +129,7 @@
     .modal-header { border-radius: var(--radius) var(--radius) 0 0; }
   }
 </style>
+  <script src="https://cdn.jsdelivr.net/npm/counterapi/dist/counter.browser.min.js"></script>
 </head>
 <body>
 
@@ -209,7 +210,7 @@
   </div>
 
   <div class="footer-note">
-    Developed for First Choice Containers Sales Representative use.<br>
+    Developed for First Choice Containers use.<br>
     Not available on the Google Play Store.
   </div>
 
@@ -280,79 +281,23 @@
       document.body.style.overflow = '';
     }
 
-    // ---- Download counter + last-downloaded (CounterAPI v1) ----
-    // Uses CounterAPI V1 public counters. The API's REST response uses
-    // the property "count" (not "value").
-    var CA_BASE = 'https://api.counterapi.dev/v1';
-    var CA_NS = 'fcc-quote-builder-app';
-    var CA_KEY_COUNT = 'downloads-v1';
-    var CA_KEY_LAST = 'last-download-ts-v1';
+    // ---- Download counter + last-downloaded ----
+    // CounterAPI official browser client.
+    // V1 is used because it works without an API key.
+    var DOWNLOAD_NAMESPACE = 'fcc-quote-builder-app';
+    var DOWNLOAD_COUNTER = 'downloads-v1';
+    var LAST_DOWNLOAD_COUNTER = 'last-download-ts-v1';
 
-    function counterUrl(key, action) {
-      return CA_BASE + '/' +
-             encodeURIComponent(CA_NS) + '/' +
-             encodeURIComponent(key) +
-             (action ? '/' + action : '');
-    }
+    var downloadCounter = new Counter({
+      version: 'v1',
+      namespace: DOWNLOAD_NAMESPACE,
+      debug: true,
+      timeout: 10000
+    });
 
-    function apiJson(url) {
-      return fetch(url, {
-        method: 'GET',
-        cache: 'no-store',
-        credentials: 'omit'
-      }).then(function(response) {
-        if (!response.ok) {
-          throw new Error('CounterAPI HTTP ' + response.status);
-        }
-        return response.json();
-      });
-    }
-
-    function getCounterValue(key) {
-      return apiJson(counterUrl(key)).then(function(data) {
-        var count = Number(data && data.count);
-        if (!Number.isFinite(count)) {
-          throw new Error('Invalid CounterAPI response');
-        }
-        return count;
-      });
-    }
-
-    function incrementDownloadCounter() {
-      return apiJson(counterUrl(CA_KEY_COUNT, 'up'));
-    }
-
-    function saveLastDownloadTime() {
-      var nowEpoch = Math.floor(Date.now() / 1000);
-      return apiJson(
-        counterUrl(CA_KEY_LAST, 'set') + '?count=' + encodeURIComponent(nowEpoch)
-      );
-    }
-
-    // Called by the Download Now button.
-    // We wait for both API operations before allowing the APK navigation.
-    function logDownload(event) {
-      if (event) event.preventDefault();
-
-      var button = event ? event.currentTarget : null;
-      var downloadUrl = button ? button.href :
-        'https://github.com/firstchoicecontainers/quote-app-apk/releases/download/v1.0.1/FCC.Quote.apk';
-
-      if (button) {
-        button.style.pointerEvents = 'none';
-        button.style.opacity = '0.75';
-      }
-
-      Promise.allSettled([
-        incrementDownloadCounter(),
-        saveLastDownloadTime()
-      ]).then(function(results) {
-        // Update the displayed values immediately after a successful click.
-        loadStats();
-
-        // Do not block the APK download if the counter service is unavailable.
-        window.location.href = downloadUrl;
-      });
+    function counterValue(result) {
+      var value = Number(result && result.value);
+      return Number.isFinite(value) ? value : 0;
     }
 
     function timeAgo(epochSeconds) {
@@ -362,10 +307,7 @@
         return 'No downloads yet';
       }
 
-      var diff = Math.max(
-        0,
-        Math.floor(Date.now() / 1000) - epochSeconds
-      );
+      var diff = Math.max(0, Math.floor(Date.now() / 1000) - epochSeconds);
 
       if (diff < 60) return 'Just now';
 
@@ -385,9 +327,7 @@
         return d + ' day' + (d === 1 ? '' : 's') + ' ago';
       }
 
-      var date = new Date(epochSeconds * 1000);
-
-      return date.toLocaleDateString(undefined, {
+      return new Date(epochSeconds * 1000).toLocaleDateString(undefined, {
         month: 'short',
         day: 'numeric',
         year: 'numeric'
@@ -403,27 +343,85 @@
       countEl.textContent = '…';
       lastEl.textContent = '…';
 
-      getCounterValue(CA_KEY_COUNT)
-        .then(function(value) {
-          countEl.textContent = value.toLocaleString();
+      downloadCounter.get(DOWNLOAD_COUNTER)
+        .then(function(result) {
+          countEl.textContent = counterValue(result).toLocaleString();
         })
         .catch(function(error) {
-          console.error('Download counter error:', error);
+          console.error('Download counter GET error:', error);
           countEl.textContent = '—';
         });
 
-      getCounterValue(CA_KEY_LAST)
-        .then(function(value) {
-          lastEl.textContent =
-            value > 0 ? timeAgo(value) : 'No downloads yet';
+      downloadCounter.get(LAST_DOWNLOAD_COUNTER)
+        .then(function(result) {
+          var timestamp = counterValue(result);
+          lastEl.textContent = timestamp > 0
+            ? timeAgo(timestamp)
+            : 'No downloads yet';
         })
         .catch(function(error) {
-          console.error('Last download error:', error);
+          console.error('Last download GET error:', error);
           lastEl.textContent = 'No downloads yet';
         });
     }
 
-    // Load the counters after the page has loaded.
+    function logDownload(event) {
+      if (event) event.preventDefault();
+
+      var button = event ? event.currentTarget : null;
+      var downloadUrl = button
+        ? button.href
+        : 'https://github.com/firstchoicecontainers/quote-app-apk/releases/download/v1.0.1/FCC.Quote.apk';
+
+      if (button) {
+        button.style.pointerEvents = 'none';
+        button.style.opacity = '0.75';
+        button.textContent = '⬇ Preparing Download...';
+      }
+
+      var nowEpoch = Math.floor(Date.now() / 1000);
+
+      // Update both counters first. The official CounterAPI client handles
+      // the V1 response format and request details.
+      Promise.all([
+        downloadCounter.up(DOWNLOAD_COUNTER),
+        downloadCounter.set(LAST_DOWNLOAD_COUNTER, nowEpoch)
+      ])
+      .then(function() {
+        // Show the new values immediately.
+        return Promise.all([
+          downloadCounter.get(DOWNLOAD_COUNTER),
+          downloadCounter.get(LAST_DOWNLOAD_COUNTER)
+        ]);
+      })
+      .then(function(results) {
+        var count = counterValue(results[0]);
+        var last = counterValue(results[1]);
+
+        var countEl = document.getElementById('statCount');
+        var lastEl = document.getElementById('statLast');
+
+        if (countEl) countEl.textContent = count.toLocaleString();
+        if (lastEl) lastEl.textContent = timeAgo(last);
+
+        // Start the APK download only after the counter operations finish.
+        window.location.href = downloadUrl;
+      })
+      .catch(function(error) {
+        // Do not prevent the user from downloading the APK if CounterAPI
+        // happens to be unavailable.
+        console.error('CounterAPI download tracking error:', error);
+
+        if (button) {
+          button.style.pointerEvents = '';
+          button.style.opacity = '';
+          button.textContent = '⬇ Download Now';
+        }
+
+        window.location.href = downloadUrl;
+      });
+    }
+
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', loadStats);
     } else {
