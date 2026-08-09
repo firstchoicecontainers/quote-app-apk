@@ -280,48 +280,109 @@
       document.body.style.overflow = '';
     }
 
-    // ---- Download counter + last-downloaded (via CountAPI, free, no signup) ----
+    // ---- Download counter + last-downloaded (CounterAPI v1) ----
+    // CountAPI was replaced here with CounterAPI's current public v1 API.
+    // v1 does not require an API key and supports browser requests.
+    var CA_BASE = 'https://api.counterapi.dev/v1';
     var CA_NS = 'fcc-quote-builder-app';
     var CA_KEY_COUNT = 'downloads-v1';
     var CA_KEY_LAST = 'last-download-ts-v1';
 
+    function counterUrl(key, action) {
+      return CA_BASE + '/' + encodeURIComponent(CA_NS) + '/' +
+             encodeURIComponent(key) + (action ? '/' + action : '');
+    }
+
     function logDownload() {
-      // Fire-and-forget: increments the count and records "now" as last-downloaded.
-      fetch('https://api.countapi.xyz/hit/' + CA_NS + '/' + CA_KEY_COUNT).catch(function(){});
+      // Increment the download counter.
+      fetch(counterUrl(CA_KEY_COUNT, 'up'), {
+        method: 'GET',
+        cache: 'no-store',
+        keepalive: true
+      }).catch(function () {});
+
+      // Store the current Unix timestamp as the last download time.
       var nowEpoch = Math.floor(Date.now() / 1000);
-      fetch('https://api.countapi.xyz/set/' + CA_NS + '/' + CA_KEY_LAST + '?value=' + nowEpoch).catch(function(){});
+      fetch(counterUrl(CA_KEY_LAST, 'set') + '?count=' + nowEpoch, {
+        method: 'GET',
+        cache: 'no-store',
+        keepalive: true
+      }).catch(function () {});
     }
 
     function timeAgo(epochSeconds) {
-      var diff = Math.floor(Date.now() / 1000) - epochSeconds;
+      epochSeconds = Number(epochSeconds);
+      if (!Number.isFinite(epochSeconds) || epochSeconds <= 0) {
+        return 'No downloads yet';
+      }
+
+      var diff = Math.max(0, Math.floor(Date.now() / 1000) - epochSeconds);
+
       if (diff < 60) return 'Just now';
-      if (diff < 3600) { var m = Math.floor(diff / 60); return m + ' min' + (m === 1 ? '' : 's') + ' ago'; }
-      if (diff < 86400) { var h = Math.floor(diff / 3600); return h + ' hour' + (h === 1 ? '' : 's') + ' ago'; }
+      if (diff < 3600) {
+        var m = Math.floor(diff / 60);
+        return m + ' min' + (m === 1 ? '' : 's') + ' ago';
+      }
+      if (diff < 86400) {
+        var h = Math.floor(diff / 3600);
+        return h + ' hour' + (h === 1 ? '' : 's') + ' ago';
+      }
+
       var d = Math.floor(diff / 86400);
-      if (d < 30) return d + ' day' + (d === 1 ? '' : 's') + ' ago';
+      if (d < 30) {
+        return d + ' day' + (d === 1 ? '' : 's') + ' ago';
+      }
+
       var date = new Date(epochSeconds * 1000);
-      return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      return date.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+    }
+
+    function getCounterValue(key) {
+      return fetch(counterUrl(key), {
+        method: 'GET',
+        cache: 'no-store'
+      }).then(function (response) {
+        if (!response.ok) {
+          throw new Error('Counter API HTTP ' + response.status);
+        }
+        return response.json();
+      }).then(function (data) {
+        if (!data) return 0;
+
+        // CounterAPI normally returns { value: ... }.
+        // Convert strings as well as numbers so the display never fails
+        // because of the API's numeric type.
+        var value = Number(data.value);
+        return Number.isFinite(value) ? value : 0;
+      });
     }
 
     function loadStats() {
-      fetch('https://api.countapi.xyz/get/' + CA_NS + '/' + CA_KEY_COUNT)
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          document.getElementById('statCount').textContent = (data && typeof data.value === 'number') ? data.value.toLocaleString() : '0';
-        })
-        .catch(function() { document.getElementById('statCount').textContent = '—'; });
+      var countEl = document.getElementById('statCount');
+      var lastEl = document.getElementById('statLast');
 
-      fetch('https://api.countapi.xyz/get/' + CA_NS + '/' + CA_KEY_LAST)
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          var el = document.getElementById('statLast');
-          if (data && typeof data.value === 'number' && data.value > 0) {
-            el.textContent = timeAgo(data.value);
-          } else {
-            el.textContent = 'No downloads yet';
-          }
+      countEl.textContent = '…';
+      lastEl.textContent = '…';
+
+      getCounterValue(CA_KEY_COUNT)
+        .then(function (value) {
+          countEl.textContent = value.toLocaleString();
         })
-        .catch(function() { document.getElementById('statLast').textContent = '—'; });
+        .catch(function () {
+          countEl.textContent = '—';
+        });
+
+      getCounterValue(CA_KEY_LAST)
+        .then(function (value) {
+          lastEl.textContent = value > 0 ? timeAgo(value) : 'No downloads yet';
+        })
+        .catch(function () {
+          lastEl.textContent = '—';
+        });
     }
 
     loadStats();
